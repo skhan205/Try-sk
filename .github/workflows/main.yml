@@ -1,12 +1,7 @@
-name: DEVXRDP – Super Persistent (Save on Cancel)
+name: DEVXRDP – Super Persistent
 
 on:
   workflow_dispatch:
-    inputs:
-      ts_authkey:
-        description: "Tailscale Auth Key"
-        required: true
-        type: string
 
 jobs:
   rdp:
@@ -14,16 +9,21 @@ jobs:
     timeout-minutes: 305
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Pre-Create Directories
+        shell: powershell
         run: |
-          $sec = ConvertTo-SecureString "Rdp!9Xq#2025" -AsPlainText -Force
+          $password = "${{ secrets.RDP_PASSWORD }}"
+          $sec = ConvertTo-SecureString $password -AsPlainText -Force
+
           if (-not (Get-LocalUser -Name "DEVXRDP" -ErrorAction SilentlyContinue)) {
             New-LocalUser -Name "DEVXRDP" -Password $sec -AccountNeverExpires
             Add-LocalGroupMember Administrators "DEVXRDP"
           }
+
           New-Item -Path "C:\Users\DEVXRDP\AppData\Local\Google\Chrome\User Data" -ItemType Directory -Force
           New-Item -Path "C:\PersistentData" -ItemType Directory -Force
           New-Item -Path "C:\Users\DEVXRDP\Downloads" -ItemType Directory -Force
@@ -40,30 +40,31 @@ jobs:
             rdp-v4-
 
       - name: Start Tailscale
-        run: |
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
-          Start-Process msiexec.exe -Wait -ArgumentList "/i","$env:TEMP\tailscale.msi","/quiet","/norestart"
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey "${{ inputs.ts_authkey }}" --hostname "DEVXRDP" --accept-dns=false
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
       - name: Setup RDP
+        shell: powershell
         run: |
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
+          Set-ItemProperty `
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name fDenyTSConnections `
+            -Value 0
+
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
       - name: RDP Active Timer
         shell: powershell
         run: |
-          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 | Select-Object -First 1
-          Write-Host "IP: $ip | User: DEVXRDP | Pass: Rdp!9Xq#2025"
-          
-          # Timer loop (taaki cancel hone par ye step break ho jaye)
-          try {
-            Start-Sleep -Seconds 18000
-          } finally {
-            Write-Host "Session stopping... moving to save data."
-          }
+          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 |
+            Select-Object -First 1
 
-      # YE STEP SABSE ZAROORI HAI: Ye cancel hone par bhi chalega
+          Write-Host "Tailscale IP: $ip"
+          Write-Host "RDP User: DEVXRDP"
+
+          Start-Sleep -Seconds 18000
+
       - name: Save Cache Always
         if: always()
         uses: actions/cache/save@v4
